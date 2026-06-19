@@ -17,6 +17,19 @@ import android.hardware.SensorManager
 import kotlin.math.sqrt
 import io.flutter.plugin.common.EventChannel
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import androidx.core.app.ActivityCompat
+
+// Constante
+private val GPS_CHANNEL = "com.tuinstituto.fitness/gps"
+private const val LOCATION_PERMISSION_REQUEST_CODE = 1001
+
+
+
 /**
  * MainActivity: punto de entrada de la aplicación Android
  * - Extiende FlutterFragmentActivity (necesario para BiometricPrompt)
@@ -65,6 +78,9 @@ class MainActivity: FlutterFragmentActivity() {
 
         // 2. CONFIGURAR EVENT CHANNEL - ACELERÓMETRO
         setupAccelerometerChannel(flutterEngine)
+
+        // 3. CONFIGURAR GPS CHANNEL
+        setupGpsChannel(flutterEngine)
     }
 
     /**
@@ -245,4 +261,132 @@ class MainActivity: FlutterFragmentActivity() {
             }
         }
     }
+
+    private fun setupGpsChannel(flutterEngine: FlutterEngine) {
+        val locationManager = getSystemService(LOCATION_SERVICE) as LocationManager
+        var locationListener: LocationListener? = null
+
+        // ═══════════════════════════════════════════════════════════
+        // METHOD CHANNEL - Operaciones puntuales
+        // ═══════════════════════════════════════════════════════════
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            GPS_CHANNEL
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "isGpsEnabled" -> {
+                    val isEnabled = locationManager.isProviderEnabled(
+                        LocationManager.GPS_PROVIDER
+                    )
+                    result.success(isEnabled)
+                }
+
+                "requestPermissions" -> {
+                    if (hasLocationPermission()) {
+                        result.success(true)
+                    } else {
+                        ActivityCompat.requestPermissions(
+                            this@MainActivity,
+                            arrayOf(
+                                Manifest.permission.ACCESS_FINE_LOCATION,
+                                Manifest.permission.ACCESS_COARSE_LOCATION
+                            ),
+                            LOCATION_PERMISSION_REQUEST_CODE
+                        )
+                        result.success(hasLocationPermission())
+                    }
+                }
+
+                "getCurrentLocation" -> {
+                    if (!hasLocationPermission()) {
+                        result.error("PERMISSION_DENIED", "Sin permisos", null)
+                        return@setMethodCallHandler
+                    }
+
+                    try {
+                        val location = locationManager.getLastKnownLocation(
+                            LocationManager.GPS_PROVIDER
+                        ) ?: locationManager.getLastKnownLocation(
+                            LocationManager.NETWORK_PROVIDER
+                        )
+
+                        if (location != null) {
+                            result.success(locationToMap(location))
+                        } else {
+                            result.error("NO_LOCATION", "No disponible", null)
+                        }
+                    } catch (e: SecurityException) {
+                        result.error("SECURITY_ERROR", e.message, null)
+                    }
+                }
+
+                else -> result.notImplemented()
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════
+        // EVENT CHANNEL - Stream de ubicaciones
+        // ═══════════════════════════════════════════════════════════
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "$GPS_CHANNEL/stream"
+        ).setStreamHandler(object : EventChannel.StreamHandler {
+
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                if (!hasLocationPermission()) {
+                    events?.error("PERMISSION_DENIED", "Sin permisos", null)
+                    return
+                }
+
+                locationListener = object : LocationListener {
+                    override fun onLocationChanged(location: Location) {
+                        // Enviar ubicación a Flutter
+                        events?.success(locationToMap(location))
+                    }
+
+                    override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+                    override fun onProviderEnabled(provider: String) {}
+                    override fun onProviderDisabled(provider: String) {}
+                }
+
+                try {
+                    // Solicitar actualizaciones
+                    locationManager.requestLocationUpdates(
+                        LocationManager.GPS_PROVIDER,
+                        1000L,      // cada 1 segundo
+                        0f,         // cualquier distancia
+                        locationListener!!
+                    )
+                } catch (e: SecurityException) {
+                    events?.error("SECURITY_ERROR", e.message, null)
+                }
+            }
+
+            override fun onCancel(arguments: Any?) {
+                locationListener?.let {
+                    locationManager.removeUpdates(it)
+                }
+                locationListener = null
+            }
+        })
+    }
+
+    private fun hasLocationPermission(): Boolean {
+        return ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION
+        ) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun locationToMap(location: Location): Map<String, Any> {
+        return mapOf(
+            "latitude" to location.latitude,
+            "longitude" to location.longitude,
+            "altitude" to location.altitude,
+            "speed" to location.speed.toDouble(),
+            "accuracy" to location.accuracy.toDouble(),
+            "timestamp" to location.time
+        )
+    }
 }
+
