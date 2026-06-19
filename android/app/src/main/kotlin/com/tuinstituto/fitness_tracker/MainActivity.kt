@@ -9,24 +9,33 @@ import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import java.util.concurrent.Executor
 
+// Importaciones adicionales para el acelerómetro
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import kotlin.math.sqrt
+import io.flutter.plugin.common.EventChannel
+
 /**
  * MainActivity: punto de entrada de la aplicación Android
  * - Extiende FlutterFragmentActivity (necesario para BiometricPrompt)
- * - Configura los Platform Channels aquí
+ * - Configura los Platform Channels y Event Channels aquí
  */
 class MainActivity: FlutterFragmentActivity() {
 
-    // PASO 1: Definir nombre del canal (DEBE coincidir con Dart)
+    // Nombres de los canales (DEBEN coincidir con Dart)
     private val BIOMETRIC_CHANNEL = "com.tuinstituto.fitness/biometric"
+    private val ACCELEROMETER_CHANNEL = "com.tuinstituto.fitness/accelerometer"
 
-    // PASO 2: Variables para biometría
+    // Variables para biometría
     private lateinit var executor: Executor
     private lateinit var biometricPrompt: BiometricPrompt
     private var pendingResult: MethodChannel.Result? = null
 
     /**
      * configureFlutterEngine: se llama al iniciar la app
-     * AQUÍ configuramos TODOS los Platform Channels
+     * AQUÍ configuramos TODOS los Platform Channels y Event Channels
      */
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -34,39 +43,28 @@ class MainActivity: FlutterFragmentActivity() {
         // Inicializar executor para biometría
         executor = ContextCompat.getMainExecutor(this)
 
-        // CONFIGURAR PLATFORM CHANNEL - BIOMETRÍA
-
+        // 1. CONFIGURAR PLATFORM CHANNEL - BIOMETRÍA
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             BIOMETRIC_CHANNEL
         ).setMethodCallHandler { call, result ->
-            /**
-             * setMethodCallHandler: escucha llamadas desde Flutter
-             *
-             * Parámetros:
-             * - call: contiene el nombre del método y argumentos
-             * - result: objeto para enviar respuesta a Flutter
-             */
-
             when (call.method) {
                 "checkBiometricSupport" -> {
-                    // Flutter llamó a checkBiometricSupport()
                     val canAuth = checkBiometricSupport()
-                    result.success(canAuth)  // Enviamos respuesta
+                    result.success(canAuth)
                 }
-
                 "authenticate" -> {
-                    // Guardamos result para responder después (async)
                     pendingResult = result
                     showBiometricPrompt()
                 }
-
                 else -> {
-                    // Método no reconocido
                     result.notImplemented()
                 }
             }
         }
+
+        // 2. CONFIGURAR EVENT CHANNEL - ACELERÓMETRO
+        setupAccelerometerChannel(flutterEngine)
     }
 
     /**
@@ -87,7 +85,6 @@ class MainActivity: FlutterFragmentActivity() {
      * Mostrar diálogo de autenticación biométrica
      */
     private fun showBiometricPrompt() {
-        // Configurar información del diálogo
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Autenticación Biométrica")
             .setSubtitle("Usa tu huella dactilar")
@@ -96,15 +93,12 @@ class MainActivity: FlutterFragmentActivity() {
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .build()
 
-        // Crear BiometricPrompt con callbacks
         biometricPrompt = BiometricPrompt(this, executor,
             object : BiometricPrompt.AuthenticationCallback() {
-
                 override fun onAuthenticationSucceeded(
                     result: BiometricPrompt.AuthenticationResult
                 ) {
                     super.onAuthenticationSucceeded(result)
-                    //  Autenticación exitosa
                     pendingResult?.success(true)
                     pendingResult = null
                 }
@@ -114,19 +108,141 @@ class MainActivity: FlutterFragmentActivity() {
                     errString: CharSequence
                 ) {
                     super.onAuthenticationError(errorCode, errString)
-                    // ❌ Error en autenticación
                     pendingResult?.success(false)
                     pendingResult = null
                 }
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    // Usuario puede reintentar
                 }
             }
         )
 
-        // Mostrar el diálogo
         biometricPrompt.authenticate(promptInfo)
+    }
+
+    /**
+     * Configurar EventChannel para acelerómetro
+     */
+    private fun setupAccelerometerChannel(flutterEngine: FlutterEngine) {
+        val sensorManager = getSystemService(SENSOR_SERVICE) as SensorManager
+        val accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
+
+        var stepCount = 0
+        var lastMagnitude = 0.0
+        var sensorEventListener: SensorEventListener? = null
+
+        // Variables para suavizado
+        val magnitudeHistory = mutableListOf<Double>()
+        val historySize = 10
+        var sampleCount = 0
+        var lastActivityType = "stationary"
+        var activityConfidence = 0
+
+        // CONFIGURAR EVENT CHANNEL
+        EventChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            ACCELEROMETER_CHANNEL
+        ).setStreamHandler(object : EventChannel.StreamHandler {
+
+            override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                sensorEventListener = object : SensorEventListener {
+                    override fun onSensorChanged(event: SensorEvent?) {
+                        event?.let {
+                            // Calcular magnitud del vector
+                            val x = it.values[0]
+                            val y = it.values[1]
+                            val z = it.values[2]
+                            val magnitude = sqrt((x * x + y * y + z * z).toDouble())
+
+                            // Promedio móvil para suavizar
+                            magnitudeHistory.add(magnitude)
+                            if (magnitudeHistory.size > historySize) {
+                                magnitudeHistory.removeAt(0)
+                            }
+                            val avgMagnitude = magnitudeHistory.average()
+
+                            // Detectar paso
+                            if (magnitude > 12 && lastMagnitude <= 12) {
+                                stepCount++
+                            }
+                            lastMagnitude = magnitude
+
+                            // Determinar actividad (con promedio)
+                            val newActivityType = when {
+                                avgMagnitude < 10.5 -> "stationary"
+                                avgMagnitude < 13.5 -> "walking"
+                                else -> "running"
+                            }
+
+                            // Solo cambiar si hay confianza
+                            if (newActivityType == lastActivityType) {
+                                activityConfidence++
+                            } else {
+                                activityConfidence = 0
+                            }
+
+                            val finalActivityType = if (activityConfidence >= 3) {
+                                newActivityType
+                            } else {
+                                lastActivityType
+                            }
+                            lastActivityType = newActivityType
+
+                            // Enviar cada 3 muestras
+                            sampleCount++
+                            if (sampleCount >= 3) {
+                                sampleCount = 0
+
+                                // ENVIAR DATOS A FLUTTER
+                                val data = mapOf(
+                                    "stepCount" to stepCount,
+                                    "activityType" to finalActivityType,
+                                    "magnitude" to avgMagnitude
+                                )
+                                events?.success(data)
+                            }
+                        }
+                    }
+
+                    override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+                }
+
+                // Registrar listener del sensor
+                sensorManager.registerListener(
+                    sensorEventListener,
+                    accelerometer,
+                    SensorManager.SENSOR_DELAY_GAME
+                )
+            }
+
+            override fun onCancel(arguments: Any?) {
+                sensorEventListener?.let {
+                    sensorManager.unregisterListener(it)
+                }
+                sensorEventListener = null
+            }
+        })
+
+        // MethodChannel auxiliar para control (iniciar, pausar, resetear)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "$ACCELEROMETER_CHANNEL/control"
+        ).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    stepCount = 0
+                    result.success(null)
+                }
+                "stop" -> {
+                    result.success(null)
+                }
+                "reset" -> {
+                    stepCount = 0
+                    result.success(null)
+                }
+                else -> result.notImplemented()
+            }
+        }
     }
 }
