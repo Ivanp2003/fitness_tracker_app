@@ -353,7 +353,7 @@ class MainActivity: FlutterFragmentActivity() {
                     // Solicitar actualizaciones
                     locationManager.requestLocationUpdates(
                         LocationManager.GPS_PROVIDER,
-                        1000L,      // cada 1 segundo
+                        500L,       // cada 500 ms
                         0f,         // cualquier distancia
                         locationListener!!
                     )

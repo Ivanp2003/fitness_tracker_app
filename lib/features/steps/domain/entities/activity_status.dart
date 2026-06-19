@@ -20,12 +20,16 @@ class PhysicalStatus extends Equatable {
   final FallState fallState;
   final int stepCount;
   final double currentMagnitude;
+  final double averageMagnitude;
+  final double cadence;
 
   const PhysicalStatus({
     required this.activityType,
     required this.fallState,
     required this.stepCount,
     required this.currentMagnitude,
+    required this.averageMagnitude,
+    required this.cadence,
   });
 
   /// Crear estado inicial por defecto
@@ -35,6 +39,8 @@ class PhysicalStatus extends Equatable {
       fallState: FallState.normal,
       stepCount: 0,
       currentMagnitude: 9.8,
+      averageMagnitude: 9.8,
+      cadence: 0.0,
     );
   }
 
@@ -44,15 +50,26 @@ class PhysicalStatus extends Equatable {
     FallState? fallState,
     int? stepCount,
     double? currentMagnitude,
+    double? averageMagnitude,
+    double? cadence,
   }) {
     return PhysicalStatus(
       activityType: activityType ?? this.activityType,
       fallState: fallState ?? this.fallState,
       stepCount: stepCount ?? this.stepCount,
       currentMagnitude: currentMagnitude ?? this.currentMagnitude,
+      averageMagnitude: averageMagnitude ?? this.averageMagnitude,
+      cadence: cadence ?? this.cadence,
     );
   }
 
   @override
-  List<Object?> get props => [activityType, fallState, stepCount, currentMagnitude];
+  List<Object?> get props => [
+        activityType,
+        fallState,
+        stepCount,
+        currentMagnitude,
+        averageMagnitude,
+        cadence,
+      ];
 }

@@ -9,7 +9,8 @@ abstract class SensorsDataSource {
 class SensorsDataSourceImpl implements SensorsDataSource {
   @override
   Stream<AccelerometerEvent> get accelerometerEvents {
-    // Retorna el stream nativo de sensores_plus
-    return accelerometerEventStream();
+    // Retorna el stream nativo de sensores_plus con intervalo normal (5 Hz / 200ms)
+    // para optimizar el consumo de batería y estabilizar las lecturas.
+    return accelerometerEventStream(samplingPeriod: SensorInterval.normalInterval);
   }
 }

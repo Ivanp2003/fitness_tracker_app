@@ -82,12 +82,8 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
   final TtsService _ttsService = TtsService();
 
   StreamSubscription<PhysicalStatus>? _subscription;
-  Timer? _debounceTimer;
   Timer? _countdownTimer;
   Timer? _sosTtsTimer;
-
-  ActivityType? _pendingActivityType;
-  ActivityType _currentOfficialActivity = ActivityType.stationary;
 
   ActivityBloc(this.monitorActivity) : super(ActivityState.initial()) {
     on<StartTrackingRequested>(_onStartTracking);
@@ -108,7 +104,6 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
 
     // Inicializar servicio de voz
     await _ttsService.init();
-    await _ttsService.speak("Iniciando monitoreo de actividad física.");
 
     // Suscribirse al caso de uso de sensores
     await _subscription?.cancel();
@@ -140,13 +135,12 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
     // Si estamos en medio de una emergencia (impacto detectado o SOS confirmado),
     // ignoramos el procesamiento de actividad y pasos
     if (state.status.fallState != FallState.normal) {
-      // Excepción: Si detectamos otro impacto fuerte pero ya estamos en alerta, lo ignoramos
       return;
     }
 
-    // 1. GESTIÓN DE CAÍDAS (Impacto de 25 m/s²)
+    // 1. GESTIÓN DE CAÍDAS (Impacto detectado)
     if (newStatus.fallState == FallState.impactDetected) {
-      _cleanupAllTimers(); // Detener debounce de actividad
+      _cleanupAllTimers();
 
       // Emitir el estado de impacto detectado con cuenta de 15 segundos
       emit(state.copyWith(
@@ -167,58 +161,27 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
       return;
     }
 
-    // 2. GESTIÓN DE PASOS (Actualización inmediata)
-    // Emitimos pasos y magnitud cruda al instante en la UI para mantener el dinamismo
+    // 2. GESTIÓN DE ACTIVIDAD Y PASOS
+    final oldActivity = state.status.activityType;
+    final newActivity = newStatus.activityType;
+
+    // Emitimos los datos en tiempo real
     emit(state.copyWith(
-      status: state.status.copyWith(
-        stepCount: newStatus.stepCount,
-        currentMagnitude: newStatus.currentMagnitude,
-      ),
+      status: newStatus,
     ));
 
-    // 3. GESTIÓN DE ACTIVIDAD (Debounce de 3 segundos para el cambio)
-    final candidateActivity = newStatus.activityType;
-
-    if (candidateActivity != _currentOfficialActivity) {
-      if (candidateActivity != _pendingActivityType) {
-        // Cancelar timer de debounce previo e iniciar el nuevo
-        _debounceTimer?.cancel();
-        _pendingActivityType = candidateActivity;
-
-        _debounceTimer = Timer(const Duration(seconds: 3), () {
-          if (_pendingActivityType == candidateActivity) {
-            _currentOfficialActivity = candidateActivity;
-            add(SensorDataReceived(newStatus.copyWith(activityType: candidateActivity)));
-          }
-        });
-      }
-    } else {
-      // El estado candidateActivity volvió al oficial, cancelar debounce pendiente
-      if (_pendingActivityType != null) {
-        _debounceTimer?.cancel();
-        _pendingActivityType = null;
-      }
-    }
-
-    // Si el estado de la actividad se consolidó oficialmente
-    if (newStatus.activityType == _currentOfficialActivity && 
-        newStatus.activityType != state.status.activityType) {
-      
-      emit(state.copyWith(
-        status: state.status.copyWith(activityType: _currentOfficialActivity),
-      ));
-
-      // Avisar por voz solo cuando cambia el estado oficial estable
+    // Avisar por voz de manera inmediata al consolidarse el cambio en el usecase
+    if (newActivity != oldActivity) {
       String message = "";
-      switch (_currentOfficialActivity) {
+      switch (newActivity) {
         case ActivityType.stationary:
-          message = "Actividad cambiada a reposo.";
+          message = "detenido";
           break;
         case ActivityType.walking:
-          message = "Actividad cambiada a caminando.";
+          message = "caminando";
           break;
         case ActivityType.running:
-          message = "Actividad cambiada a corriendo.";
+          message = "corriendo";
           break;
       }
       _ttsService.speak(message);
@@ -242,7 +205,7 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
         countdown: 0,
       ));
 
-      // Bucle de voz de emergencia con pausa de 7 segundos (rango de 6-8s)
+      // Bucle de voz de emergencia con pausa de 7 segundos
       _sosTtsTimer?.cancel();
       _speakSosAlert(); // Ejecución inmediata
       _sosTtsTimer = Timer.periodic(const Duration(seconds: 7), (timer) {
@@ -261,13 +224,6 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
   ) {
     _cleanupAllTimers();
     _ttsService.stop();
-    
-    // Anunciar restablecimiento
-    _ttsService.speak("Alerta cancelada. Retornando a monitoreo normal.");
-
-    // Volver a estado normal restableciendo la detección de actividad
-    _currentOfficialActivity = ActivityType.stationary;
-    _pendingActivityType = null;
 
     emit(state.copyWith(
       status: state.status.copyWith(
@@ -279,7 +235,6 @@ class ActivityBloc extends Bloc<ActivityEvent, ActivityState> {
   }
 
   void _cleanupAllTimers() {
-    _debounceTimer?.cancel();
     _countdownTimer?.cancel();
     _sosTtsTimer?.cancel();
   }

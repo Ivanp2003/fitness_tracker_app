@@ -3,8 +3,8 @@ import 'package:flutter_tts/flutter_tts.dart';
 
 /// Servicio de Síntesis de Voz (Text-to-Speech)
 ///
-/// Encapsula el uso de `flutter_tts` configurado en idioma español
-/// con tono y velocidad estables.
+/// Encapsula el uso de `flutter_tts` configurado en idioma español.
+/// Implementa una cola secuencial asíncrona para evitar el solapamiento de frases.
 class TtsService {
   static final TtsService _instance = TtsService._internal();
   factory TtsService() => _instance;
@@ -12,13 +12,19 @@ class TtsService {
   final FlutterTts _flutterTts = FlutterTts();
   bool _isInitialized = false;
 
+  // Cola secuencial de reproducción de audio
+  Future<void> _speakingFuture = Future.value();
+
   TtsService._internal();
 
-  /// Inicializa el servicio configurando el idioma en español
+  /// Inicializa el servicio configurando el idioma en español y activando el await completion
   Future<void> init() async {
     if (_isInitialized) return;
 
     try {
+      // Configurar para esperar a que finalice la frase actual antes de resolver el Future
+      await _flutterTts.awaitSpeakCompletion(true);
+
       // Intentar establecer el idioma en español (España/México)
       bool isLanguageAvailable = await _flutterTts.isLanguageAvailable("es-ES") as bool;
       if (isLanguageAvailable) {
@@ -37,22 +43,29 @@ class TtsService {
     }
   }
 
-  /// Reproduce el texto suministrado
+  /// Reproduce el texto suministrado encolándolo secuencialmente
   Future<void> speak(String text) async {
     if (!_isInitialized) {
       await init();
     }
-    try {
-      await _flutterTts.stop(); // Detener cualquier reproducción en curso
-      await _flutterTts.speak(text);
-    } catch (e) {
-      debugPrint("Error al reproducir voz: $e");
-    }
+
+    // Encadenar secuencialmente la nueva reproducción en la cola
+    _speakingFuture = _speakingFuture.then((_) async {
+      try {
+        await _flutterTts.speak(text);
+      } catch (e) {
+        debugPrint("Error al reproducir voz: $e");
+      }
+    });
+
+    // Esperar a que se complete el turno de reproducción
+    await _speakingFuture;
   }
 
-  /// Detiene cualquier reproducción activa
+  /// Detiene cualquier reproducción activa y vacía la cola
   Future<void> stop() async {
     try {
+      _speakingFuture = Future.value(); // Vaciar y resetear la cola de reproducción
       await _flutterTts.stop();
     } catch (e) {
       debugPrint("Error al detener voz: $e");

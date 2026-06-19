@@ -229,6 +229,76 @@ class _StepCounterViewState extends State<StepCounterView> {
                 ],
               ),
               const SizedBox(height: 16),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.amber.shade300, width: 1.5),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.build_circle, color: Colors.amber.shade800, size: 20),
+                        const SizedBox(width: 8),
+                        Text(
+                          'PANEL DE CALIBRACIÓN',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            color: Colors.amber.shade800,
+                            letterSpacing: 1.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 16, thickness: 1),
+                    Text(
+                      '• Magnitud cruda: ${state.status.currentMagnitude.toStringAsFixed(4)} m/s²',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '• Promedio móvil (avg): ${state.status.averageMagnitude.toStringAsFixed(4)} m/s²',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '• Actividad detectada: ${state.status.activityType.name.toUpperCase()}',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.deepOrange,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '• Cadencia actual: ${state.status.cadence.toStringAsFixed(1)} pasos/min',
+                      style: const TextStyle(
+                        fontFamily: 'monospace',
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                        color: Colors.blueAccent,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
