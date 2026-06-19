@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
-import '../../../auth/data/datasources/accelerometer_datasource.dart';
-import '../../../auth/domain/entities/step_data.dart';
+import '../../data/datasources/accelerometer_datasource.dart';
+import '../../domain/entities/step_data.dart';
 
 /// Widget que muestra el contador de pasos
 ///

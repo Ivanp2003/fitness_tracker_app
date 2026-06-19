@@ -52,4 +52,3 @@ class AccelerometerDataSourceImpl implements AccelerometerDataSource {
     return activityStatus.isGranted && sensorsStatus.isGranted;
   }
 }
-
