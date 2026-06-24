@@ -30,7 +30,7 @@ class LoginPage extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+                  colors: [Color(0xFF0A8BFF), Color(0xFF12D6C8)],
                 ),
               ),
               child: SafeArea(
@@ -69,7 +69,7 @@ class LoginPage extends StatelessWidget {
                               vertical: 16,
                             ),
                             backgroundColor: Colors.white,
-                            foregroundColor: const Color(0xFF6366F1),
+                            foregroundColor: const Color(0xFF0A8BFF),
                           ),
                         ),
                     ],

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../../../core/di/service_locator.dart';
 import '../../data/datasources/sensors_datasource.dart';
 import '../../domain/entities/activity_status.dart';
 import '../../domain/usecases/monitor_activity.dart';
@@ -9,7 +10,7 @@ import 'fall_alert_dialog.dart';
 /// Widget de Conteo de Pasos y Detector de Actividad
 ///
 /// Modifica y reemplaza la implementación directa anterior para integrarse
-/// con el ActivityBloc mediante Clean Architecture y sensores_plus.
+/// con el ActivityBloc mediante Clean Architecture y sensors_plus.
 class StepCounterWidget extends StatelessWidget {
   const StepCounterWidget({super.key});
 
@@ -18,7 +19,8 @@ class StepCounterWidget extends StatelessWidget {
     // Proveer el Bloc localmente para que sea autónomo
     return BlocProvider(
       create: (_) => ActivityBloc(
-        MonitorActivity(SensorsDataSourceImpl()),
+        monitorActivity: MonitorActivity(SensorsDataSourceImpl()),
+        createActivityRecord: ServiceLocator.createActivityRecord,
       ),
       child: const StepCounterView(),
     );
@@ -38,8 +40,46 @@ class _StepCounterViewState extends State<StepCounterView> {
   @override
   Widget build(BuildContext context) {
     return BlocListener<ActivityBloc, ActivityState>(
+      listenWhen: (previous, current) => 
+          previous.errorMessage != current.errorMessage || 
+          previous.saveMessage != current.saveMessage ||
+          previous.status.fallState != current.status.fallState,
       listener: (context, state) {
-        // Mostrar modal si se detecta impacto inicial
+        
+        // 1. Mostrar SnackBar de guardado exitoso
+        if (state.saveMessage.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const SizedBox(
+                    width: 20, height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  ),
+                  const SizedBox(width: 12),
+                  Text(state.saveMessage),
+                ],
+              ),
+              backgroundColor: Colors.green.shade700,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+
+        // 2. Mostrar SnackBar si hay un error
+        if (state.errorMessage.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(state.errorMessage),
+              backgroundColor: Colors.red.shade800,
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+
+        // 3. Mostrar modal si se detecta impacto inicial
         if (state.status.fallState == FallState.impactDetected) {
           if (!_isDialogOpen) {
             _isDialogOpen = true;
@@ -64,12 +104,9 @@ class _StepCounterViewState extends State<StepCounterView> {
       },
       child: BlocBuilder<ActivityBloc, ActivityState>(
         builder: (context, state) {
-          // Si se confirma el SOS, renderizamos la pantalla de emergencia roja
           if (state.status.fallState == FallState.sosConfirmed) {
             return _buildSosEmergencyView(context, state);
           }
-
-          // Si no, mostramos la UI principal de seguimiento
           return _buildStepTrackerCard(context, state);
         },
       ),
@@ -143,20 +180,46 @@ class _StepCounterViewState extends State<StepCounterView> {
 
   /// Tarjeta principal de conteo y monitoreo físico
   Widget _buildStepTrackerCard(BuildContext context, ActivityState state) {
+    final theme = Theme.of(context);
+    final onSurface = theme.colorScheme.onSurface;
     return Card(
       elevation: 4,
+      shadowColor: const Color(0xFF0A8BFF).withValues(alpha: 0.15),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border(
+            top: BorderSide(color: const Color(0xFF0A8BFF).withValues(alpha: 0.3), width: 3),
+          ),
+        ),
+        child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            // Cabecera del control de tracking
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Actividad y Movimiento',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0A8BFF).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.directions_run, color: Color(0xFF0A8BFF), size: 22),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Actividad',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: onSurface,
+                      ),
+                    ),
+                  ],
                 ),
                 ElevatedButton.icon(
                   onPressed: () {
@@ -166,16 +229,25 @@ class _StepCounterViewState extends State<StepCounterView> {
                       context.read<ActivityBloc>().add(StartTrackingRequested());
                     }
                   },
-                  icon: Icon(state.isTracking ? Icons.stop : Icons.play_arrow),
+                  icon: Icon(state.isTracking ? Icons.stop : Icons.play_arrow, size: 20),
                   label: Text(state.isTracking ? 'Detener' : 'Iniciar'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: state.isTracking ? Colors.red : Colors.green,
+                    backgroundColor: state.isTracking ? Colors.red : const Color(0xFF69F06A),
                     foregroundColor: Colors.white,
+                    elevation: 2,
+                    shadowColor: state.isTracking
+                        ? Colors.red.withValues(alpha: 0.4)
+                        : const Color(0xFF69F06A).withValues(alpha: 0.4),
+                    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
                 ),
               ],
             ),
-            const Divider(height: 24),
+            const SizedBox(height: 16),
+            if (state.errorMessage.isEmpty)
+              Container(height: 1, color: Colors.grey.withValues(alpha: 0.15)),
+            const SizedBox(height: 4),
 
             if (state.errorMessage.isNotEmpty) ...[
               Text(
@@ -188,29 +260,64 @@ class _StepCounterViewState extends State<StepCounterView> {
 
             if (!state.isTracking) ...[
               const SizedBox(height: 20),
-              Icon(Icons.directions_run, size: 64, color: Colors.grey[400]),
-              const SizedBox(height: 12),
-              Text(
-                'Presiona "Iniciar" para comenzar el conteo de pasos y la detección inteligente de caídas.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey[600], fontSize: 14),
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0A8BFF).withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: const Color(0xFF0A8BFF).withValues(alpha: 0.08)),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.directions_run, size: 56, color: const Color(0xFF0A8BFF).withValues(alpha: 0.4)),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Presiona "Iniciar" para comenzar',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: onSurface,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Conteo de pasos y detección de caídas',
+                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 20),
             ] else ...[
               // Valor del contador
-              Text(
-                '${state.status.stepCount}',
-                style: const TextStyle(
-                  fontSize: 72,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF6366F1),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Column(
+                  children: [
+                    Text(
+                      '${state.status.stepCount}',
+                      style: const TextStyle(
+                        fontSize: 72,
+                        fontWeight: FontWeight.bold,
+                        color: Color(0xFF0A8BFF),
+                        height: 1.1,
+                      ),
+                    ),
+                    Text(
+                      'PASOS',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: onSurface,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const Text(
-                'PASOS REGISTRADOS',
-                style: TextStyle(fontSize: 12, color: Colors.grey, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
+              Container(height: 1, color: Colors.grey.withValues(alpha: 0.12)),
+              const SizedBox(height: 16),
 
               // Fila de información adicional
               Row(
@@ -224,7 +331,7 @@ class _StepCounterViewState extends State<StepCounterView> {
                   _buildStatusChip(
                     icon: Icons.graphic_eq_rounded,
                     label: '${state.status.currentMagnitude.toStringAsFixed(2)} m/s²',
-                    color: Colors.purple,
+                    color: const Color(0xFF12D6C8),
                   ),
                 ],
               ),
@@ -233,87 +340,66 @@ class _StepCounterViewState extends State<StepCounterView> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.amber.shade50,
+                  color: const Color(0xFF12D6C8).withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.amber.shade300, width: 1.5),
+                  border: Border.all(color: const Color(0xFF12D6C8).withValues(alpha: 0.15)),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Icon(Icons.build_circle, color: Colors.amber.shade800, size: 20),
+                        Icon(Icons.monitor_heart, color: const Color(0xFF12D6C8), size: 18),
                         const SizedBox(width: 8),
-                        Text(
-                          'PANEL DE CALIBRACIÓN',
-                          style: TextStyle(
+                        const Text(
+                          'SENSORES',
+                          style: const TextStyle(
                             fontWeight: FontWeight.bold,
-                            fontSize: 12,
-                            color: Colors.amber.shade800,
-                            letterSpacing: 1.1,
+                            fontSize: 11,
+                            color: Color(0xFF12D6C8),
+                            letterSpacing: 1.2,
                           ),
                         ),
                       ],
                     ),
-                    const Divider(height: 16, thickness: 1),
-                    Text(
-                      '• Magnitud cruda: ${state.status.currentMagnitude.toStringAsFixed(4)} m/s²',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: Colors.black87,
-                      ),
-                    ),
+                    const SizedBox(height: 10),
+                    _sensorRow('Magnitud', '${state.status.currentMagnitude.toStringAsFixed(2)} m/s²', const Color(0xFF0A8BFF)),
                     const SizedBox(height: 6),
-                    Text(
-                      '• Promedio móvil (avg): ${state.status.averageMagnitude.toStringAsFixed(4)} m/s²',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13,
-                        color: Colors.black87,
-                      ),
-                    ),
+                    _sensorRow('Promedio', '${state.status.averageMagnitude.toStringAsFixed(2)} m/s²', const Color(0xFF12D6C8)),
                     const SizedBox(height: 6),
-                    Text(
-                      '• Actividad detectada: ${state.status.activityType.name.toUpperCase()}',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Colors.deepOrange,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '• Cadencia actual: ${state.status.cadence.toStringAsFixed(1)} pasos/min',
-                      style: const TextStyle(
-                        fontFamily: 'monospace',
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                        color: Colors.blueAccent,
-                      ),
-                    ),
+                    _sensorRow('Cadencia', '${state.status.cadence.toStringAsFixed(1)} pasos/min', const Color(0xFF69F06A)),
                   ],
                 ),
               ),
+            ],
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.info_outline, size: 16, color: Colors.grey),
+                  Icon(Icons.local_fire_department, size: 16, color: Colors.orange[400]),
                   const SizedBox(width: 6),
-                  Text(
-                    'Calorías Estimadas: ${state.status.stepCount * 0.04} kcal',
-                    style: const TextStyle(color: Colors.grey, fontSize: 13),
-                  ),
+                    Text(
+                      'Calorías: ${state.status.stepCount * 0.04} kcal',
+                      style: TextStyle(color: onSurface, fontSize: 13, fontWeight: FontWeight.w600),
+                    ),
                 ],
               ),
             ],
-          ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _sensorRow(String label, String value, Color color) {
+    return Row(
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 8),
+        Text(label, style: TextStyle(color: Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.6), fontSize: 12)),
+        const Spacer(),
+        Text(value, style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: color)),
+      ],
     );
   }
 
@@ -368,11 +454,11 @@ class _StepCounterViewState extends State<StepCounterView> {
   Color _getActivityColor(ActivityType type) {
     switch (type) {
       case ActivityType.walking:
-        return Colors.blue;
+        return const Color(0xFF0A8BFF);
       case ActivityType.running:
         return Colors.orange;
       case ActivityType.stationary:
-        return Colors.green;
+        return const Color(0xFF69F06A);
     }
   }
 }

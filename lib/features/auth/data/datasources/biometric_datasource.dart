@@ -1,36 +1,25 @@
+import 'package:local_auth/local_auth.dart';
 import 'package:flutter/services.dart';
-import '../../../../core/platform/platform_channels.dart';
 import '../../domain/entities/auth_result.dart';
 
-/// DataSource para autenticación biométrica usando Platform Channels
-/// - Este es el LADO FLUTTER del Platform Channel
-/// - Usamos MethodChannel porque es petición/respuesta
-/// - El nombre del canal DEBE coincidir con el lado Android
 abstract class BiometricDataSource {
   Future<bool> canAuthenticate();
   Future<AuthResult> authenticate();
 }
 
 class BiometricDataSourceImpl implements BiometricDataSource {
-  /// MethodChannel: canal de comunicación Flutter ↔ Android
-  /// El nombre debe ser exactamente igual en ambos lados
-  final MethodChannel _channel = const MethodChannel(
-    PlatformChannels.biometric
-  );
+  final LocalAuthentication _localAuth;
+
+  BiometricDataSourceImpl({LocalAuthentication? localAuth}) 
+      : _localAuth = localAuth ?? LocalAuthentication();
 
   @override
   Future<bool> canAuthenticate() async {
     try {
-      /// invokeMethod: envía un mensaje a Android y espera respuesta
-      /// - Parámetro 1: nombre del método (debe coincidir en Android)
-      /// - Retorna: un Future con la respuesta
-      final result = await _channel.invokeMethod<bool>(
-        'checkBiometricSupport'
-      );
-
-      return result ?? false;
-    } on PlatformException catch (e) {
-      print('Error verificando biometría: ${e.message}');
+      final canCheck = await _localAuth.canCheckBiometrics;
+      final isSupported = await _localAuth.isDeviceSupported();
+      return canCheck || isSupported;
+    } catch (e) {
       return false;
     }
   }
@@ -38,19 +27,28 @@ class BiometricDataSourceImpl implements BiometricDataSource {
   @override
   Future<AuthResult> authenticate() async {
     try {
-      /// Llamamos al método 'authenticate' del lado Android
-      final result = await _channel.invokeMethod<bool>('authenticate');
+      final isSupported = await canAuthenticate();
+      if (!isSupported) {
+        return const AuthResult(success: false, message: 'Dispositivo no soporta biometría');
+      }
 
-      return AuthResult(
-        success: result ?? false,
-        message: result == true ? 'Autenticación exitosa' : 'Autenticación fallida',
+      final authenticated = await _localAuth.authenticate(
+        localizedReason: 'Por favor, autentícate para acceder a la aplicación',
+        options: const AuthenticationOptions(
+          biometricOnly: false,
+          stickyAuth: true,
+        ),
       );
+
+      if (authenticated) {
+        return const AuthResult(success: true);
+      } else {
+        return const AuthResult(success: false, message: 'Autenticación cancelada');
+      }
     } on PlatformException catch (e) {
-      return AuthResult(
-        success: false,
-        message: 'Error: ${e.message}',
-      );
+      return AuthResult(success: false, message: 'Error de plataforma: ${e.message}');
+    } catch (e) {
+      return AuthResult(success: false, message: 'Error desconocido: $e');
     }
   }
 }
-
